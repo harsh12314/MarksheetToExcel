@@ -28,7 +28,8 @@ import {
   Sliders,
   Save,
   History,
-  BookmarkCheck
+  BookmarkCheck,
+  Tag,
 } from 'lucide-react';
 import { ProcessedMarksheet, MarksheetData, SavedBatch } from './types';
 import { validateMarksheet } from './utils/validation';
@@ -39,6 +40,7 @@ import { ImagePreviewModal } from './components/ImagePreviewModal';
 import { ExcelExportView } from './components/ExcelExportView';
 import { BatchHistoryView } from './components/BatchHistoryView';
 import { ConfirmModal } from './components/ConfirmModal';
+import { SaveBatchModal } from './components/SaveBatchModal';
 
 import { optimizeImageForOcr } from './utils/imageCompressor';
 import { saveDocumentLocally, getDocumentUrl } from './utils/localDocumentStore';
@@ -85,6 +87,10 @@ export default function App() {
     message: '',
     onConfirm: () => {},
   });
+
+  // Batch naming & saving modal
+  const [batchName, setBatchName] = useState<string>('');
+  const [saveBatchModalOpen, setSaveBatchModalOpen] = useState<boolean>(false);
 
   // Timing metrics for ETA
   const [startTime, setStartTime] = useState<number | null>(null);
@@ -600,7 +606,9 @@ export default function App() {
       isApproved: it.approved,
     }));
 
-    downloadExcelFile(rowsToExport, `Student_Marksheets_Batch_${Date.now()}.xlsx`);
+    const cleanBatchName = batchName.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = cleanBatchName ? `${cleanBatchName}.xlsx` : `Student_Marksheets_Batch_${Date.now()}.xlsx`;
+    downloadExcelFile(rowsToExport, filename);
 
     setExportSuccessMessage(
       `Successfully exported ${exportTargets.length} marksheet(s) with ${allSubjects.length} dynamic subject columns to Excel!`
@@ -630,13 +638,17 @@ export default function App() {
     }
   }, [history]);
 
-  // Save current workspace to history and clear workspace ("when i click save it should clear it self and show in history")
+  // Open modal to name/confirm batch when saving
   const handleSaveBatch = () => {
     if (items.length === 0) {
       alert('No marksheets in current workspace to save.');
       return;
     }
+    setSaveBatchModalOpen(true);
+  };
 
+  // Commit and save the batch with the specified title
+  const executeSaveBatch = (customTitle?: string) => {
     const completedItems = items.filter((it) => it.status === 'success' && it.data);
     const boardsSet = new Set<string>();
     let totalPercent = 0;
@@ -668,11 +680,12 @@ export default function App() {
 
     const batchNum = history.length + 1;
     const boardSuffix = boardsList.length > 0 ? ` (${boardsList.slice(0, 2).join(', ')})` : '';
-    const defaultTitle = `Batch #${batchNum} - ${items.length} Marksheets${boardSuffix}`;
+    const fallbackTitle = batchName.trim() || `Batch #${batchNum} - ${items.length} Marksheets${boardSuffix}`;
+    const finalTitle = customTitle?.trim() || fallbackTitle;
 
     const newBatch: SavedBatch = {
       id: `batch-${Date.now()}`,
-      title: defaultTitle,
+      title: finalTitle,
       savedAt: new Date().toISOString(),
       itemCount: items.length,
       completedCount: completedItems.length,
@@ -688,6 +701,8 @@ export default function App() {
     // 2. Clear active workspace
     setItems([]);
     itemsRef.current = [];
+    setBatchName('');
+    setSaveBatchModalOpen(false);
     setIsProcessing(false);
     setIsPaused(false);
     setActiveWorkers(0);
@@ -715,6 +730,7 @@ export default function App() {
         onConfirm: () => {
           setItems(batch.items);
           itemsRef.current = batch.items;
+          setBatchName(batch.title);
           setMainTab('interpretation');
           setExportSuccessMessage(
             `Restored "${batch.title}" with ${batch.items.length} marksheets into active workspace.`
@@ -727,6 +743,7 @@ export default function App() {
 
     setItems(batch.items);
     itemsRef.current = batch.items;
+    setBatchName(batch.title);
     setMainTab('interpretation');
     setExportSuccessMessage(
       `Restored "${batch.title}" with ${batch.items.length} marksheets into active workspace.`
@@ -1114,6 +1131,31 @@ export default function App() {
               </p>
             </div>
 
+            {/* Batch Name Input Field */}
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 border border-blue-200">
+                  <Tag className="w-4 h-4" />
+                </div>
+                <div>
+                  <label htmlFor="input-initial-batch-name" className="text-xs font-bold text-slate-800 block">
+                    Batch Name (Optional)
+                  </label>
+                  <p className="text-[11px] text-slate-500">
+                    Name this batch before dropping files, or customize it anytime before saving.
+                  </p>
+                </div>
+              </div>
+              <input
+                id="input-initial-batch-name"
+                type="text"
+                value={batchName}
+                onChange={(e) => setBatchName(e.target.value)}
+                placeholder={`e.g. Batch #${history.length + 1} - 10th Board Exam`}
+                className="w-full sm:w-80 px-3.5 py-2 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-hidden font-medium text-slate-800 bg-slate-50/50 focus:bg-white transition"
+              />
+            </div>
+
             {/* Multi-Dropzone */}
             <div
               id="massive-dropzone"
@@ -1263,6 +1305,30 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            {/* Batch Name Header Bar */}
+            <div className="bg-gradient-to-r from-blue-50/90 to-indigo-50/70 border border-blue-200/80 rounded-xl p-3 px-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                  <Tag className="w-3.5 h-3.5" />
+                </div>
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <span className="text-xs font-bold text-blue-950 shrink-0">Batch Name:</span>
+                  <input
+                    id="input-workspace-batch-name"
+                    type="text"
+                    value={batchName}
+                    onChange={(e) => setBatchName(e.target.value)}
+                    placeholder={`Batch #${history.length + 1} (${items.length} marksheets)`}
+                    className="flex-1 max-w-md px-3 py-1.5 text-xs font-semibold text-slate-800 bg-white rounded-lg border border-blue-200 hover:border-blue-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 focus:outline-hidden transition shadow-2xs"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] text-blue-700/80 shrink-0 font-medium">
+                <span>Auto-saved with history & Excel export</span>
+              </div>
+            </div>
+
             {/* Batch Status & Concurrency Control Bar */}
             <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs space-y-4">
               {/* Progress Summary Header */}
@@ -1667,6 +1733,19 @@ export default function App() {
         isDanger={confirmModal.isDanger !== false}
         onConfirm={confirmModal.onConfirm}
         onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+      />
+
+      {/* Name Batch Modal */}
+      <SaveBatchModal
+        isOpen={saveBatchModalOpen}
+        defaultName={
+          batchName.trim() ||
+          `Batch #${history.length + 1} - ${items.length} Marksheets`
+        }
+        itemCount={items.length}
+        completedCount={completedCount}
+        onSave={(name) => executeSaveBatch(name)}
+        onCancel={() => setSaveBatchModalOpen(false)}
       />
     </div>
   );
