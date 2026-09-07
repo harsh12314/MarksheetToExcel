@@ -189,7 +189,19 @@ export default function App() {
         }),
       });
 
-      const resJson = await response.json();
+      const responseText = await response.text();
+      let resJson: any = {};
+      try {
+        resJson = JSON.parse(responseText);
+      } catch (jsonErr) {
+        console.error('Server returned non-JSON response:', responseText);
+        throw new Error(
+          `Server Error (${response.status}): ${
+            responseText.slice(0, 150) || 'Invalid server response'
+          }`
+        );
+      }
+
       const isRateLimit =
         response.status === 429 ||
         resJson.isRateLimit === true ||
