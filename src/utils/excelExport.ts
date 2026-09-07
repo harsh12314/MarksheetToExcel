@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { MarksheetData } from '../types';
 
 /**
@@ -250,6 +250,41 @@ export function generateExcelWorkbook(items: StudentExcelRow[]) {
     );
     return { wch: Math.min(Math.max(maxLen + 3, 12), 40) };
   });
+
+  // Apply bold styling and clean aesthetic to the header row
+  if (worksheet['!ref']) {
+    const range = XLSX.utils.decode_range(worksheet['!ref']);
+    worksheet['!rows'] = [{ hpt: 26 }]; // Header row height
+
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const headerCellAddress = XLSX.utils.encode_cell({ r: 0, c: C });
+      const cell = worksheet[headerCellAddress];
+      if (cell) {
+        cell.s = {
+          font: {
+            name: 'Calibri',
+            sz: 11,
+            bold: true,
+            color: { rgb: '0F172A' }, // Slate 900
+          },
+          fill: {
+            fgColor: { rgb: 'E2E8F0' }, // Slate 200 header fill
+          },
+          alignment: {
+            horizontal: 'center',
+            vertical: 'center',
+            wrapText: true,
+          },
+          border: {
+            top: { style: 'thin', color: { rgb: '94A3B8' } },
+            bottom: { style: 'medium', color: { rgb: '475569' } },
+            left: { style: 'thin', color: { rgb: 'CBD5E1' } },
+            right: { style: 'thin', color: { rgb: 'CBD5E1' } },
+          },
+        };
+      }
+    }
+  }
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Consolidated Marksheets');
