@@ -6,7 +6,6 @@ import "dotenv/config";
 
 const PORT = 3000;
 
-
 let aiClient: GoogleGenAI | null = null;
 function getAIClient(): GoogleGenAI {
   if (!aiClient) {
@@ -72,7 +71,6 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-
   // Health check
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -81,32 +79,40 @@ async function startServer() {
   // Extract marksheet endpoint
   app.post("/api/extract-marksheet", async (req, res) => {
     try {
-      const { imageBase64, mimeType, fileName } = req.body;
+      const { imageBase64, mimeType } = req.body;
       if (!imageBase64) {
         return res.status(400).json({ error: "Missing imageBase64 in request body." });
       }
 
       const ai = getAIClient();
-      // Remove any data URL scheme prefix if present
       const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, "");
       const resolvedMime = mimeType || "image/jpeg";
 
       const prompt = `You are an expert marksheet and educational transcript parser.
-Examine this marksheet carefully. Different educational boards (CBSE, ICSE, State Boards, Universities, etc.) format marks, student identifiers, and grades in completely varied ways.
+Examine this document carefully. It may contain a single student's marksheet or MULTIPLE students' marksheets/transcripts across one or more pages.
 
 CRITICAL INSTRUCTIONS:
-1. Extract student info fields (student_name, roll_number, registration_number, date_of_birth, board, class_name, year, school) ONLY if actually present in the document. Do not guess, infer, or hallucinate values. If a field is not present, use null.
-2. Return all subjects as a list of subject objects under "subjects". Never return fixed subject columns.
+1. Extract ALL students present in the document into the "students" array. If there are multiple students (e.g. multi-page PDF, group marksheet, or class roster), extract EVERY student as a separate object in the "students" array. Do not stop after the first student.
+2. For each student in "students":
+   - "student_name": Full name of the student.
+   - "roll_number": Roll number / Seat number / Hall ticket number.
+   - "registration_number": Registration / PRN / Enrollment number.
+   - "date_of_birth": Date of birth if present.
+   - "board": Educational board or university name (e.g. CBSE, ICSE, State Board, University).
+   - "class_name": Class / Course / Semester (e.g. Class X, Class XII, B.Tech Sem 4).
+   - "year": Passing / Exam year.
+   - "school": School / College / Institute name.
+   - "subjects": List of subjects taken by this student.
+   - "total": Total marks obtained for this student.
+   - "percentage": Overall percentage for this student.
+   - "low_confidence_fields": Array of field names that were blurry or ambiguous.
 3. For each subject in "subjects":
-   - "name": Clean official subject name as printed (e.g., "Mathematics", "English Core", "Physics", "Chemistry")
+   - "name": Clean official subject name as printed (e.g., "Mathematics", "English Core", "Physics")
    - "marks": Student's obtained marks as a number, or null if only a grade or absent.
    - "max_marks": Maximum marks possible for this subject (e.g. 100, 50, 75) if indicated, or null.
-   - "grade": Letter grade (e.g., "A1", "B+", "PASS") if printed, or null.
-4. "total": Total marks obtained across subjects. If not explicitly printed on the marksheet, calculate and return the sum of all numeric subject marks obtained.
-5. "percentage": Overall percentage (e.g., 85.4). If not explicitly printed on the marksheet, calculate as (total marks obtained / total maximum marks possible) * 100.
-6. "low_confidence_fields": An array of field names that were blurry, faint, ambiguous, or where you have lower confidence in the OCR/interpretation (e.g. ["roll_number"] or ["subjects.0.marks"]). Return [] if everything is clear.`;
+   - "grade": Letter grade (e.g., "A1", "B+", "PASS") if printed, or null.`;
 
-      const responseSchema = {
+      const studentSchema = {
         type: Type.OBJECT,
         properties: {
           student_name: { type: Type.STRING, nullable: true },
@@ -140,14 +146,24 @@ CRITICAL INSTRUCTIONS:
         required: ["subjects"],
       };
 
-      // Try primary model gemini-2.5-flash, fallback to gemini-2.0-flash and gemini-1.5-flash
+      const responseSchema = {
+        type: Type.OBJECT,
+        properties: {
+          students: {
+            type: Type.ARRAY,
+            items: studentSchema,
+          },
+        },
+        required: ["students"],
+      };
+
       const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
       let response;
       let lastErr: any = null;
 
       for (const modelName of modelsToTry) {
-        let retries = 3;
-        let delay = 1500;
+        let retries = 2;
+        let delay = 1000;
 
         while (retries >= 0) {
           try {
@@ -171,7 +187,7 @@ CRITICAL INSTRUCTIONS:
                 responseSchema,
               },
             });
-            break; // Success!
+            break;
           } catch (callErr: any) {
             lastErr = callErr;
             retries--;
@@ -179,17 +195,12 @@ CRITICAL INSTRUCTIONS:
 
             if (retries >= 0 && parsedError.isRateLimit) {
               const jitter = Math.floor(Math.random() * 500);
-              console.warn(
-                `Gemini [${modelName}] rate limited (429). Retrying in ${delay + jitter}ms... (${retries} left)`
-              );
               await new Promise((r) => setTimeout(r, delay + jitter));
               delay *= 2;
             } else if (retries >= 0 && (parsedError.statusCode >= 500 || callErr?.code === "ETIMEDOUT")) {
-              console.warn(`Transient server error [${modelName}]. Retrying in ${delay}ms... (${retries} left)`);
               await new Promise((r) => setTimeout(r, delay));
               delay *= 1.5;
             } else {
-              // Try next model if available
               break;
             }
           }
@@ -209,7 +220,7 @@ CRITICAL INSTRUCTIONS:
       }
 
       const textOutput = response?.text || "{}";
-      let parsedData;
+      let parsedData: any;
       try {
         parsedData = JSON.parse(textOutput);
       } catch {
@@ -220,29 +231,45 @@ CRITICAL INSTRUCTIONS:
         });
       }
 
-      if (parsedData && Array.isArray(parsedData.subjects)) {
-        let sumMarks = 0;
-        let sumMaxMarks = 0;
-        let validMarksCount = 0;
-        for (const sub of parsedData.subjects) {
-          if (typeof sub.marks === "number" && !isNaN(sub.marks)) {
-            sumMarks += sub.marks;
-            validMarksCount++;
-            const max = typeof sub.max_marks === "number" && sub.max_marks > 0 ? sub.max_marks : 100;
-            sumMaxMarks += max;
+      let studentList: any[] = [];
+      if (parsedData && Array.isArray(parsedData.students) && parsedData.students.length > 0) {
+        studentList = parsedData.students;
+      } else if (parsedData && Array.isArray(parsedData.subjects)) {
+        studentList = [parsedData];
+      } else if (parsedData && parsedData.student_name) {
+        studentList = [parsedData];
+      }
+
+      studentList.forEach((student) => {
+        if (Array.isArray(student.subjects)) {
+          let sumMarks = 0;
+          let sumMaxMarks = 0;
+          let validMarksCount = 0;
+          for (const sub of student.subjects) {
+            if (typeof sub.marks === "number" && !isNaN(sub.marks)) {
+              sumMarks += sub.marks;
+              validMarksCount++;
+              const max = typeof sub.max_marks === "number" && sub.max_marks > 0 ? sub.max_marks : 100;
+              sumMaxMarks += max;
+            }
+          }
+          if ((student.total === null || student.total === undefined) && validMarksCount > 0) {
+            student.total = sumMarks;
+          }
+          if (
+            (student.percentage === null || student.percentage === undefined) &&
+            student.total &&
+            sumMaxMarks > 0
+          ) {
+            student.percentage = Math.round((student.total / sumMaxMarks) * 10000) / 100;
           }
         }
-        if ((parsedData.total === null || parsedData.total === undefined) && validMarksCount > 0) {
-          parsedData.total = sumMarks;
-        }
-        if ((parsedData.percentage === null || parsedData.percentage === undefined) && parsedData.total && sumMaxMarks > 0) {
-          parsedData.percentage = Math.round((parsedData.total / sumMaxMarks) * 10000) / 100;
-        }
-      }
+      });
 
       return res.json({
         success: true,
-        data: parsedData,
+        students: studentList,
+        data: studentList[0] || null,
         rawOutput: textOutput,
       });
     } catch (err: any) {

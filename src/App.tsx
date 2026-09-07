@@ -258,18 +258,29 @@ export default function App() {
         throw new Error(resJson.error || 'Extraction failed');
       }
 
-      const extractedData: MarksheetData = resJson.data;
-      const { total: calcTotal, percentage: calcPct } = calculateTotalsAndPercentage(extractedData);
-      if ((extractedData.total === null || extractedData.total === undefined) && calcTotal !== null) {
-        extractedData.total = calcTotal;
-      }
-      if ((extractedData.percentage === null || extractedData.percentage === undefined) && calcPct !== null) {
-        extractedData.percentage = calcPct;
-      }
-      const validationIssues = validateMarksheet(extractedData);
-      const hasErrors = validationIssues.some((issue) => issue.type === 'error');
+      const studentList: MarksheetData[] =
+        Array.isArray(resJson.students) && resJson.students.length > 0
+          ? resJson.students
+          : resJson.data
+          ? [resJson.data]
+          : [];
 
-      // 1. Save to browser IndexedDB (instant, works offline, local to this device)
+      if (studentList.length === 0) {
+        throw new Error('No student data extracted from marksheet');
+      }
+
+      // 1. Process Student 0 for the primary target item
+      const primaryStudent = studentList[0];
+      const { total: calcTotal, percentage: calcPct } = calculateTotalsAndPercentage(primaryStudent);
+      if ((primaryStudent.total === null || primaryStudent.total === undefined) && calcTotal !== null) {
+        primaryStudent.total = calcTotal;
+      }
+      if ((primaryStudent.percentage === null || primaryStudent.percentage === undefined) && calcPct !== null) {
+        primaryStudent.percentage = calcPct;
+      }
+      const primaryValidation = validateMarksheet(primaryStudent);
+
+      // Save document to browser IndexedDB
       let finalPreviewUrl = currentItem.file.previewUrl || '';
       try {
         const rawFile = (currentItem.file as any).rawFile as File | undefined;
@@ -290,21 +301,64 @@ export default function App() {
           it.id === targetId
             ? {
                 ...it,
+                status: 'success',
+                data: primaryStudent,
+                validationIssues: primaryValidation,
+                approved: !primaryValidation.some((issue) => issue.type === 'error'),
                 file: {
                   ...it.file,
                   previewUrl: finalPreviewUrl,
                 },
-                status: 'success',
-                data: extractedData,
-                rawJson: resJson.rawOutput,
-                validationIssues,
-                approved: !hasErrors,
-                isRateLimit: undefined,
                 retryCountdown: undefined,
               }
             : it
         )
       );
+
+      // 2. If the PDF contained MULTIPLE students (e.g. 5 students in 1 multi-page PDF), add Student 1..N to workspace
+      if (studentList.length > 1) {
+        const extraStudentItems: ProcessedMarksheet[] = [];
+
+        for (let sIdx = 1; sIdx < studentList.length; sIdx++) {
+          const extraStudent = studentList[sIdx];
+          const { total: extraTotal, percentage: extraPct } = calculateTotalsAndPercentage(extraStudent);
+          if ((extraStudent.total === null || extraStudent.total === undefined) && extraTotal !== null) {
+            extraStudent.total = extraTotal;
+          }
+          if ((extraStudent.percentage === null || extraStudent.percentage === undefined) && extraPct !== null) {
+            extraStudent.percentage = extraPct;
+          }
+          const extraValidation = validateMarksheet(extraStudent);
+
+          const extraId = `${targetId}-student-${sIdx}`;
+          const studentDisplayName = extraStudent.student_name
+            ? `${extraStudent.student_name} (${currentItem.file.name})`
+            : `${currentItem.file.name} - Student ${sIdx + 1}`;
+
+          const rawFile = (currentItem.file as any).rawFile as File | undefined;
+          if (rawFile) {
+            saveDocumentLocally(extraId, rawFile, studentDisplayName).catch(() => {});
+          }
+
+          extraStudentItems.push({
+            id: extraId,
+            file: {
+              ...currentItem.file,
+              name: studentDisplayName,
+              previewUrl: finalPreviewUrl,
+            },
+            status: 'success',
+            data: extraStudent,
+            validationIssues: extraValidation,
+            approved: !extraValidation.some((issue) => issue.type === 'error'),
+          });
+        }
+
+        const updatedWithExtra = [...itemsRef.current, ...extraStudentItems];
+        itemsRef.current = updatedWithExtra;
+        setItems(updatedWithExtra);
+      }
+
       setProcessedCount((c) => c + 1);
     } catch (err: any) {
       console.error(`Extraction failed for ${currentItem.file.name}:`, err);
