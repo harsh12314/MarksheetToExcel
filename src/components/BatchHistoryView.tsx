@@ -468,7 +468,9 @@ export function BatchHistoryView({
                                         handleViewDocument(
                                           item.id,
                                           item.file?.previewUrl,
-                                          data?.student_name || item.file.name
+                                          item.file?.name
+                                            ? `${item.file.name}${data?.student_name ? ` (${data.student_name})` : ''}`
+                                            : data?.student_name || 'Marksheet Document'
                                         )
                                       }
                                       disabled={loadingDocId === item.id}

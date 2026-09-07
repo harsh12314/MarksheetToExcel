@@ -455,6 +455,13 @@ export default function App() {
     itemsRef.current = updated;
     setItems(updated);
 
+    // Save documents to local IndexedDB immediately so they are available in History anytime
+    newItems.forEach((it) => {
+      if ((it.file as any)?.rawFile) {
+        saveDocumentLocally(it.id, (it.file as any).rawFile, it.file.name);
+      }
+    });
+
     // Switch automatically to dense table view if adding a large batch (10+)
     if (updated.length >= 10 && viewMode === 'cards') {
       setViewMode('table');
