@@ -179,7 +179,9 @@ CRITICAL INSTRUCTIONS:
     // gemini-2.5-flash routes internally to preview infrastructure (low capacity → 503).
     // Override with GEMINI_MODEL env var if needed (e.g. GEMINI_MODEL=gemini-2.5-flash).
     const primaryModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
-    const modelsToTry = [...new Set([primaryModel, 'gemini-2.0-flash', 'gemini-1.5-flash'])];
+    // Ordered by availability: stable GA models first, experimental last.
+    // gemini-2.0-flash-lite is extremely high capacity — great last resort.
+    const modelsToTry = [...new Set([primaryModel, 'gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash'])];
     let response;
     let lastErr: any = null;
 
@@ -215,7 +217,12 @@ CRITICAL INSTRUCTIONS:
           retries--;
           const parsedError = parseGenAiError(callErr);
 
-          if (retries >= 0 && parsedError.isRateLimit) {
+          if (parsedError.statusCode === 503 || (parsedError.isRateLimit && parsedError.statusCode !== 429)) {
+            // 503 / capacity unavailable: don't waste retries on this model.
+            // Break immediately so the outer loop tries the next model.
+            break;
+          } else if (retries >= 0 && parsedError.isRateLimit) {
+            // 429 rate limit: back off and retry the same model
             const jitter = Math.floor(Math.random() * 500);
             await new Promise((r) => setTimeout(r, delay + jitter));
             delay *= 2;
