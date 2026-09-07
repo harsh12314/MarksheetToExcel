@@ -233,6 +233,9 @@ export const MarksheetReviewCard: React.FC<Props> = ({
       if (err.includes('429') || err.includes('RESOURCE_EXHAUSTED') || err.includes('quota') || err.includes('rate limit')) {
         return 'Gemini API rate limit reached (429). Click Retry or wait a moment.';
       }
+      if (err.includes('503') || err.includes('UNAVAILABLE') || err.includes('No capacity') || err.includes('overloaded')) {
+        return 'Gemini model temporarily unavailable (503). Click Retry to use a fallback model.';
+      }
       if (err.startsWith('{')) {
         try {
           const parsed = JSON.parse(err);

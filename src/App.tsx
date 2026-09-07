@@ -365,7 +365,11 @@ export default function App() {
       const errMsg = String(err.message || err);
       const isRateLimit =
         errMsg.includes('429') ||
+        errMsg.includes('503') ||
         errMsg.includes('RESOURCE_EXHAUSTED') ||
+        errMsg.includes('UNAVAILABLE') ||
+        errMsg.includes('No capacity') ||
+        errMsg.includes('overloaded') ||
         errMsg.includes('rate limit');
 
       if (isRateLimit) {

@@ -41,6 +41,11 @@ function parseGenAiError(err: any): { isRateLimit: boolean; message: string; sta
           isRateLimit = true;
           statusCode = 429;
         }
+        // Treat 503 UNAVAILABLE (capacity errors) as transient/retryable
+        if (parsed.error.status === "UNAVAILABLE" || parsed.error.code === 503) {
+          isRateLimit = true;
+          statusCode = 503;
+        }
       }
     } catch {
       // not JSON
@@ -59,6 +64,21 @@ function parseGenAiError(err: any): { isRateLimit: boolean; message: string; sta
     isRateLimit = true;
     statusCode = 429;
     cleanMessage = "Gemini API rate limit reached (429). The system will automatically back off and retry.";
+  }
+
+  // 503 / UNAVAILABLE / capacity errors — transient server-side, cycle to next model
+  if (
+    statusCode === 503 ||
+    rawMessage.includes("503") ||
+    rawMessage.includes("UNAVAILABLE") ||
+    rawMessage.includes("No capacity") ||
+    rawMessage.includes("overloaded") ||
+    cleanMessage.includes("UNAVAILABLE") ||
+    cleanMessage.includes("No capacity")
+  ) {
+    isRateLimit = true; // reuse backoff logic
+    statusCode = 503;
+    cleanMessage = "Gemini model capacity unavailable (503). Retrying with fallback model...";
   }
 
   return { isRateLimit, message: cleanMessage, statusCode };
@@ -157,7 +177,11 @@ CRITICAL INSTRUCTIONS:
         required: ["students"],
       };
 
-      const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+      // Use stable GA models first to avoid 503 capacity errors from experimental preview endpoints.
+      // gemini-2.5-flash routes internally to preview infrastructure (low capacity → 503).
+      // Override with GEMINI_MODEL env var if needed (e.g. GEMINI_MODEL=gemini-2.5-flash).
+      const primaryModel = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+      const modelsToTry = [...new Set([primaryModel, "gemini-2.0-flash", "gemini-1.5-flash"])];
       let response;
       let lastErr: any = null;
 

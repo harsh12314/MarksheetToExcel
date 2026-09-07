@@ -23,10 +23,14 @@ function formatCleanError(err?: string): string {
   if (str.includes('429') || str.includes('RESOURCE_EXHAUSTED') || str.includes('quota') || str.includes('rate limit')) {
     return 'Rate limited (429)';
   }
+  if (str.includes('503') || str.includes('UNAVAILABLE') || str.includes('No capacity') || str.includes('overloaded')) {
+    return 'Unavailable (503)';
+  }
   if (str.startsWith('{')) {
     try {
       const parsed = JSON.parse(str);
       if (parsed.error?.code === 429) return 'Rate limited (429)';
+      if (parsed.error?.code === 503) return 'Unavailable (503)';
       if (parsed.error?.message) return parsed.error.message.slice(0, 30);
     } catch {
       // not json

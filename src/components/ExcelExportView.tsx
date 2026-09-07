@@ -184,7 +184,18 @@ export const ExcelExportView: React.FC<Props> = ({
 
                 {/* Dynamic Subject Columns */}
                 {allSubjects.map((subject, sIdx) => {
-                  const colLetter = String.fromCharCode(70 + (sIdx % 20)); // F, G, H...
+                  // Correctly compute spreadsheet column letters (F, G..., Z, AA, AB...)
+                  const colIndex = 5 + sIdx; // A=0, so F=5 is the first subject column
+                  const toColLetter = (n: number): string => {
+                    let s = '';
+                    let idx = n;
+                    while (idx >= 0) {
+                      s = String.fromCharCode(65 + (idx % 26)) + s;
+                      idx = Math.floor(idx / 26) - 1;
+                    }
+                    return s;
+                  };
+                  const colLetter = toColLetter(colIndex);
                   return (
                     <th
                       key={subject}
