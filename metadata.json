@@ -1,0 +1,6 @@
+{
+  "name": "Marksheet-to-Excel Converter",
+  "description": "Convert student marksheets from various boards and formats into structured data and clean Excel files using Gemini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
