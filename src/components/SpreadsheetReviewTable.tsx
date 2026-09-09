@@ -26,15 +26,26 @@ function formatCleanError(err?: string): string {
   if (str.includes('503') || str.includes('UNAVAILABLE') || str.includes('No capacity') || str.includes('overloaded')) {
     return 'Unavailable (503)';
   }
+  if (str.includes('not found') || str.includes('no longer available') || str.includes('NOT_FOUND') || str.includes('404')) {
+    return 'Model unavailable';
+  }
   if (str.startsWith('{')) {
     try {
       const parsed = JSON.parse(str);
       if (parsed.error?.code === 429) return 'Rate limited (429)';
       if (parsed.error?.code === 503) return 'Unavailable (503)';
-      if (parsed.error?.message) return parsed.error.message.slice(0, 30);
+      if (parsed.error?.code === 404) return 'Model unavailable';
+      if (parsed.error?.message) {
+        const msg = String(parsed.error.message);
+        if (msg.includes('not found') || msg.includes('no longer available')) return 'Model unavailable';
+        return msg.length > 25 ? msg.slice(0, 25) + '...' : msg;
+      }
     } catch {
       // not json
     }
+  }
+  if (str.startsWith('models/')) {
+    return 'Model error';
   }
   if (str.length > 25) {
     return str.slice(0, 25) + '...';
@@ -433,10 +444,15 @@ export const SpreadsheetReviewTable: React.FC<Props> = ({
                         )}
                       </div>
                     ) : item.status === 'error' ? (
-                      <div className="flex items-center justify-between gap-1.5 text-xs text-red-700 py-0.5">
-                        <span className="truncate max-w-[130px] font-semibold text-red-800" title={item.error || 'Extraction failed'}>
-                          {formatCleanError(item.error)}
-                        </span>
+                      <div className="flex items-center justify-between gap-1.5 text-xs py-0.5">
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-xs text-slate-800 font-medium truncate max-w-[130px]" title={item.file.name}>
+                            {item.file.name}
+                          </span>
+                          <span className="text-[10px] text-red-600 font-semibold truncate max-w-[130px]" title={item.error || 'Extraction failed'}>
+                            {formatCleanError(item.error)}
+                          </span>
+                        </div>
                         {onProcessSingle && (
                           <button
                             type="button"

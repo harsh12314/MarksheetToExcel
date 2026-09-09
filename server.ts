@@ -81,6 +81,16 @@ function parseGenAiError(err: any): { isRateLimit: boolean; message: string; sta
     cleanMessage = "Gemini model capacity unavailable (503). Retrying with fallback model...";
   }
 
+  // 404 / NOT_FOUND / decommissioned models
+  if (
+    statusCode === 404 ||
+    rawMessage.includes("NOT_FOUND") ||
+    rawMessage.includes("is no longer available") ||
+    rawMessage.includes("is not found")
+  ) {
+    cleanMessage = "Configured Gemini model is unavailable or discontinued.";
+  }
+
   return { isRateLimit, message: cleanMessage, statusCode };
 }
 
@@ -177,13 +187,11 @@ CRITICAL INSTRUCTIONS:
         required: ["students"],
       };
 
-      // Use stable GA models first to avoid 503 capacity errors from experimental preview endpoints.
-      // gemini-2.5-flash routes internally to preview infrastructure (low capacity → 503).
-      // Override with GEMINI_MODEL env var if needed (e.g. GEMINI_MODEL=gemini-2.5-flash).
-      const primaryModel = process.env.GEMINI_MODEL || "gemini-2.0-flash";
-      // Ordered by availability: stable GA models first, experimental last.
-      // gemini-2.0-flash-lite is extremely high capacity — great last resort.
-      const modelsToTry = [...new Set([primaryModel, "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash"])];
+      // Use stable GA multimodal models: gemini-2.5-flash is stable and fast.
+      // Override with GEMINI_MODEL env var if needed (e.g. GEMINI_MODEL=gemini-3.5-flash).
+      const primaryModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+      // Ordered by reliability and speed: stable GA first, then latest fallback.
+      const modelsToTry = [...new Set([primaryModel, "gemini-2.5-flash", "gemini-3.5-flash", "gemini-flash-latest"])];
       let response;
       let lastErr: any = null;
 
